@@ -88,20 +88,26 @@ it is the only QA budget this project gets before strangers see it.
 **To uninstall:** delete the two entries under `hooks` in
 `~/.claude/settings.json`, or restore the `.bak-` file alongside it.
 
+### ⚠️ Do not also `/plugin install` on this machine
+
+The hooks are currently registered manually in `settings.json` for
+dogfooding. Installing the published plugin *as well* would register a
+second copy of both hooks, so every tool call would be recorded twice and
+nudge rate-limiting would be evaluated against doubled rows.
+
+Before testing the plugin install path on this machine, remove the two
+`settings.json` entries first. Strangers are unaffected — they only ever have
+one copy.
+
 ---
 
 ## Deliberately not done
 
-**The public GitHub repo does not exist yet.** Committed locally on `main`,
-24 files, one commit. Creating and pushing a public repo is an outward-facing,
-hard-to-reverse action and it's yours to trigger:
-
-```bash
-gh repo create context-guardian --public --source . --push
-```
-
-The README's install snippet assumes `yashrajsinh/context-guardian`; if the
-repo lands under a different name, that line needs updating.
+*(Superseded — the repo is now live at
+https://github.com/yash161004/context-guardian, pushed on explicit
+instruction. The GitHub account is `yash161004`, so the README install line
+and the manifest `homepage`/`repository` fields were corrected before the
+push. Committed files were scanned for credentials first; clean.)*
 
 **No before/after GIF.** The roadmap asks for one in the README and it is the
 single highest-value thing still missing — it needs a real session that
