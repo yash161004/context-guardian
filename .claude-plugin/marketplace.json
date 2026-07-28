@@ -1,0 +1,14 @@
+{
+  "name": "context-guardian",
+  "owner": {
+    "name": "Yashrajsinh Rathod",
+    "email": "rathodyashraj73@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "context-guardian",
+      "source": "./",
+      "description": "Detects when a Claude Code session is losing context and nudges Claude to delegate or compact."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "context-guardian",
+  "displayName": "Context Guardian",
+  "description": "Detects when a Claude Code session is losing context and nudges Claude to delegate or compact - instead of showing you a dashboard.",
+  "author": {
+    "name": "Yashrajsinh Rathod",
+    "email": "rathodyashraj73@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "context",
+    "context-window",
+    "tokens",
+    "compact",
+    "subagent",
+    "observability",
+    "hooks"
+  ],
+  "hooks": "./hooks/hooks.json"
+}

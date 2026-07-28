@@ -1,0 +1,26 @@
+{
+  "enabled": true,
+
+  "_comment_thresholds": "Absolute token counts, NOT a percentage of the context window. Derived from a 6-session personal corpus of coding-heavy work on 1M-context models (Opus 4.8/5, Sonnet 5). These are a v1 default, not a universal constant - if you run a 200k-window model, lower them or they can never fire.",
+  "context_warn_tokens": 200000,
+  "context_urgent_tokens": 350000,
+
+  "_comment_nudge": "Phase 2. Suggest-only: v1 never runs /compact itself, it tells Claude what the sensor sees and lets Claude decide. A nudge fires once on ENTERING a level, not once per turn - 60% of turns in the validation corpus sat above the warn line, so per-turn firing would nag continuously.",
+  "nudge_enabled": true,
+  "rearm_margin_tokens": 20000,
+  "repeat_read_nudge_once_per_file": true,
+  "max_nudges_per_session": 12,
+
+  "repeat_read_window": 10,
+  "repeat_read_threshold": 3,
+  "repeat_read_window_counts": "reads",
+
+  "_comment_scratchpad": "Paths excluded from repeat-read counting. Phase 0 found 33% of repeat-read events were the agent polling its own background-task output - correct behaviour, not confusion. Patterns use fnmatch semantics against a lowercased forward-slash path, so '*' crosses separators.",
+  "scratchpad_path_patterns": [
+    "*/tasks/*.output",
+    "*/scratchpad/*",
+    "*/.claude/projects/*",
+    "*/temp/claude/*",
+    "*/tmp/claude/*"
+  ]
+}
