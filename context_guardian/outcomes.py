@@ -24,6 +24,7 @@ import argparse
 import sqlite3
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import load_config
@@ -37,6 +38,14 @@ DEFAULT_FOLLOW_WINDOW = 15
 COMPACTION_DROP = 0.30
 
 DELEGATION_TOOLS = {"Task", "Agent"}
+
+
+def _parse_ts(value):
+    try:
+        ts = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
 def _nearest_tool_call_id(conn, session_id, timestamp):
@@ -84,6 +93,71 @@ def classify(conn, nudge, window):
     return "ignored", None
 
 
+def report_no_nudges(conn, cfg):
+    """Explain a zero-nudge result at the moment it is read.
+
+    This exists because of a specific, predictable misreading. After three
+    days of real work, "0 nudges" *feels* like "the idea doesn't work" - and
+    that instinct would kill a project whose detector is fine and whose
+    thresholds are simply set for someone else's sessions. Saying so in a
+    design doc is useless; the person needs to read it here, in the output,
+    at the moment they draw the conclusion.
+    """
+    row = conn.execute(
+        """SELECT MIN(timestamp) first, MAX(timestamp) last, COUNT(*) n,
+                  MAX(running_context_tokens) peak
+             FROM tool_calls WHERE is_sidechain = 0""").fetchone()
+
+    if not row or not row["n"]:
+        print("No nudges, and no tool calls recorded either.\n"
+              "That is an install problem, not a result. Run:\n"
+              "    python -m context_guardian.selfcheck")
+        return
+
+    days = None
+    first, last = _parse_ts(row["first"]), _parse_ts(row["last"])
+    if first and last:
+        days = (last - first).total_seconds() / 86400
+
+    peak = row["peak"] or 0
+    warn = cfg["context_warn_tokens"]
+
+    print(f"No nudges emitted.\n")
+    print(f"  recording for   : {days:.1f} day(s)" if days is not None
+          else "  recording for   : unknown")
+    print(f"  tool calls seen : {row['n']:,}")
+    print(f"  peak context    : {_fmt_tokens(peak)} tokens")
+    print(f"  warn threshold  : {_fmt_tokens(warn)} tokens")
+
+    if days is not None and days < 2.5:
+        print("\nToo early to conclude anything - keep working normally.")
+        return
+
+    # Past the dogfooding window with nothing. This is the branch that gets
+    # misread, so say the conclusion outright.
+    print("\n" + "=" * 68)
+    print("READ THIS BEFORE CONCLUDING THE IDEA DOESN'T WORK")
+    print("=" * 68)
+    print(
+        "Zero nudges after a full dogfooding window does NOT mean the\n"
+        "detector is broken or the premise is wrong. It means the THRESHOLD\n"
+        "is set for someone else's sessions - it was derived from a 6-session\n"
+        "corpus of unusually long runs, and your real work is shorter.\n"
+    )
+    if peak:
+        pct = peak / warn * 100
+        print(f"Your peak was {_fmt_tokens(peak)}, which is {pct:.0f}% of the "
+              f"warn threshold.")
+        suggested = max(50_000, int(peak * 0.75 / 10_000) * 10_000)
+        print(f"\nThe fix is one number. Try:\n"
+              f"    context_warn_tokens   : {suggested:,}\n"
+              f"    context_urgent_tokens : {int(suggested * 1.75):,}\n"
+              f"in ~/.claude/context-guardian/config.json, then keep working.")
+    print("\nAbandon the project only if it nudges and Claude ignores it, and\n"
+          "rewriting the message doesn't help. That is a different result\n"
+          "from this one.")
+
+
 def run(window=DEFAULT_FOLLOW_WINDOW):
     cfg = load_config()
     db_path = Path(cfg["db_path"])
@@ -103,9 +177,7 @@ def run(window=DEFAULT_FOLLOW_WINDOW):
     print("Context Guardian - did the nudge change anything?\n")
 
     if not nudges:
-        print("No nudges emitted yet.\n"
-              "Keep working normally; this only means no session has crossed "
-              "a threshold.")
+        report_no_nudges(conn, cfg)
         conn.close()
         return 0
 
