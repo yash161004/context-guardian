@@ -31,7 +31,7 @@ working, and it's *Claude* that needs to change what it's doing.
 ## Install
 
 ```bash
-/plugin marketplace add yashrajsinh/context-guardian
+/plugin marketplace add yash161004/context-guardian
 ```
 
 ```bash

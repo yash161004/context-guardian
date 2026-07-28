@@ -5,8 +5,11 @@
   "description": "Detects when a Claude Code session is losing context and nudges Claude to delegate or compact - instead of showing you a dashboard.",
   "author": {
     "name": "Yashrajsinh Rathod",
-    "email": "rathodyashraj73@gmail.com"
+    "email": "rathodyashraj73@gmail.com",
+    "url": "https://github.com/yash161004"
   },
+  "homepage": "https://github.com/yash161004/context-guardian",
+  "repository": "https://github.com/yash161004/context-guardian",
   "license": "MIT",
   "keywords": [
     "context",
