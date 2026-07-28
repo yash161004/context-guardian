@@ -157,6 +157,20 @@ It reports whether rows are being recorded, when the last one landed, peak
 context seen, and any nudges emitted — with a likely cause when something
 looks off.
 
+## Does it actually work?
+
+Fair question, and the honest answer is that a nudge only matters if Claude
+acts on it. So that's measured too:
+
+```bash
+python3 -m context_guardian.outcomes
+```
+
+For every nudge, it reports what happened next — `delegated` (a subagent was
+spawned), `compacted` (context dropped sharply), or `ignored`. If you're
+seeing mostly `ignored`, the message needs rewriting, and an issue with your
+numbers is genuinely useful to me.
+
 ## Development
 
 ```bash
@@ -173,6 +187,9 @@ the measurement that forced it:
 - [`docs/phase0-findings.md`](docs/phase0-findings.md) — trigger validation
 - [`docs/phase1-notes.md`](docs/phase1-notes.md) — the sensor
 - [`docs/phase2-notes.md`](docs/phase2-notes.md) — the nudge
+- [`docs/phase3-notes.md`](docs/phase3-notes.md) — packaging
+- [`docs/phase4-gate.md`](docs/phase4-gate.md) — the launch gate, written
+  before the data arrived
 
 ## Status
 
