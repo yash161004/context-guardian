@@ -1,5 +1,6 @@
 {
   "name": "context-guardian",
+  "description": "Context-health tooling for Claude Code sessions: detects context pressure and repeated file re-reads, and nudges Claude to delegate or compact.",
   "owner": {
     "name": "Yashrajsinh Rathod",
     "email": "rathodyashraj73@gmail.com"
