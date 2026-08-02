@@ -52,39 +52,61 @@ def _basename(path):
 
 
 def build_message(level, context_tokens, hot_file=None, hot_count=None,
-                  warn_tokens=None, urgent_tokens=None):
+                  warn_tokens=None, urgent_tokens=None,
+                  suggest_delegation=False):
     """Compose the note injected as additionalContext.
 
-    Addressed to Claude, not to the user - that is the whole differentiator
-    of this project. It states what was measured and suggests, without
-    instructing: the model is better placed than this hook to judge whether
-    delegating or compacting actually makes sense right now.
+    Rewritten after the first dogfooding round, which measured 22% acted-on
+    against a 50% gate. The investigation (docs/phase4-results.md) found the
+    problem was not phrasing but the *recommended action*:
+
+      - "delegate to a subagent" was suggested in every message and happened
+        ZERO times in 2,926 tool calls - because Claude Code instructs the
+        model not to spawn agents unless the user asks for it. The advice was
+        unactionable by construction, so `suggest_delegation` now defaults to
+        off.
+      - "/compact" is a user command. Claude cannot run it. Telling Claude to
+        compact is telling it to do something it has no lever for.
+
+    What Claude *can* actually do is (a) stop re-reading files already in
+    context, and (b) tell the user, who does hold the /compact lever. So the
+    messages now ask for exactly those, and nothing else.
     """
     ctx = _fmt_tokens(context_tokens)
     name = _basename(hot_file)
 
+    if level == REPEAT_READ:
+        # The only fully autonomous action available - and the most concrete.
+        return (f"Context Guardian: you have read {name} {hot_count} times in "
+                f"the last few reads. Its contents are already in this "
+                f"conversation - re-reading spends context without adding "
+                f"information. Refer back to what you already have unless you "
+                f"have reason to believe the file changed.")
+
     if level == URGENT:
-        head = (f"Context Guardian: this session is at ~{ctx} tokens of context, "
-                f"past the urgent threshold of {_fmt_tokens(urgent_tokens)}.")
-        tail = ("Strongly consider delegating remaining exploration to a subagent, "
-                "or suggesting the user run /compact before continuing.")
+        head = (f"Context Guardian: this session is at ~{ctx} tokens, past the "
+                f"urgent threshold of {_fmt_tokens(urgent_tokens)}.")
+        ask = ("Only the user can run /compact, so tell them the context is "
+               "getting heavy - briefly, at your next natural pause, without "
+               "derailing what you are doing.")
     elif level == WARN:
-        head = (f"Context Guardian: this session is at ~{ctx} tokens of context, "
-                f"past the warn threshold of {_fmt_tokens(warn_tokens)}.")
-        tail = ("Consider delegating further exploration to a subagent, or "
-                "suggesting /compact if the remaining work is large.")
-    elif level == REPEAT_READ:
-        head = (f"Context Guardian: {name} has been read {hot_count} times in the "
-                f"last few reads (context ~{ctx} tokens).")
-        tail = ("If this is re-reading to recover detail that has scrolled out of "
-                "reach, consider delegating that exploration to a subagent.")
+        head = (f"Context Guardian: this session is at ~{ctx} tokens, past the "
+                f"warn threshold of {_fmt_tokens(warn_tokens)}.")
+        ask = ("Worth mentioning to the user at your next natural pause so they "
+               "can decide whether to /compact - it is their command to run, "
+               "not yours. Do not interrupt current work for it.")
     else:
         return None
 
-    if level in (WARN, URGENT) and name and hot_count:
-        head += f" {name} has also been read {hot_count} times recently."
-
-    return f"{head} {tail}"
+    parts = [head]
+    if name and hot_count:
+        parts.append(f"{name} has also been read {hot_count} times recently and "
+                     f"is already in context - do not re-read it.")
+    parts.append(ask)
+    if suggest_delegation:
+        parts.append("If substantial exploration remains, a subagent would keep "
+                     "it out of this context.")
+    return " ".join(parts)
 
 
 def evaluate(*, context_tokens, cfg, hot_file=None, hot_count=None,
@@ -121,6 +143,7 @@ def evaluate(*, context_tokens, cfg, hot_file=None, hot_count=None,
             hot_file=hot_file if repeat_fires else None,
             hot_count=hot_count if repeat_fires else None,
             warn_tokens=warn, urgent_tokens=urgent,
+            suggest_delegation=cfg.get("suggest_delegation", False),
         )
         return Decision(level=level, subject=subject, context_tokens=tokens,
                         message=message)

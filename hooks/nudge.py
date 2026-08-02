@@ -132,6 +132,10 @@ def main():
             context_tokens=decision.context_tokens,
             message=decision.message,
             timestamp=datetime.now(timezone.utc).isoformat(),
+            # Recorded so the outcome tracker can later check whether Claude
+            # actually raised it with the user - the one action the new
+            # message asks for, and one a PostToolUse sensor cannot see.
+            transcript_path=transcript_path,
         )
         conn.close()
 

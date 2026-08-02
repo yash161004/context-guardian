@@ -59,8 +59,22 @@ def connect(db_path):
     except sqlite3.DatabaseError:
         pass
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
     return conn
+
+
+def _migrate(conn):
+    """Additive column migrations for databases created by older versions.
+
+    Kept deliberately dumb - add-column-if-missing only. A sensor that
+    destroys someone's collected history to reshape a table is not a trade
+    worth making.
+    """
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(nudges)")}
+    for column, ddl in (("transcript_path", "TEXT"),):
+        if column not in have:
+            conn.execute(f"ALTER TABLE nudges ADD COLUMN {column} {ddl}")
 
 
 def record_tool_call(conn, *, session_id, tool_name, file_path, is_sidechain,
@@ -129,13 +143,14 @@ def has_active_nudge(conn, session_id, level, subject=None):
 
 
 def record_nudge(conn, *, session_id, level, message, subject=None,
-                 context_tokens=None, timestamp):
+                 context_tokens=None, timestamp, transcript_path=None):
     conn.execute(
         """INSERT INTO nudges
                (session_id, level, subject, context_tokens, timestamp,
-                active, message)
-           VALUES (?, ?, ?, ?, ?, 1, ?)""",
-        (session_id, level, subject, context_tokens, timestamp, message),
+                active, message, transcript_path)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+        (session_id, level, subject, context_tokens, timestamp, message,
+         transcript_path),
     )
     conn.commit()
 

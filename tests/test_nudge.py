@@ -139,13 +139,52 @@ def test_hysteresis_prevents_flapping_at_the_boundary():
 # Message content
 # --------------------------------------------------------------------------
 
-def test_message_is_addressed_to_claude_not_the_user():
-    """The differentiator: it nudges the model, not the human."""
+def test_message_asks_for_an_action_claude_can_actually_take():
+    """Round-1 dogfooding: 22% acted on, and 0 delegations in 2,926 tool calls.
+
+    Claude cannot run /compact (a user command) and is instructed not to
+    spawn subagents unprompted. The only available lever is telling the user,
+    so that is what the message must ask for.
+    """
     msg = build_message(WARN, 280_000, warn_tokens=WARN_T, urgent_tokens=URGENT_T)
-    assert "subagent" in msg
+    assert "user" in msg
     assert "/compact" in msg
-    # Suggests rather than instructs - Claude is better placed to judge.
-    assert "Consider" in msg or "consider" in msg
+    assert "their command to run, not yours" in msg
+    # And it must not derail work in progress.
+    assert "Do not interrupt current work" in msg
+
+
+def test_delegation_is_not_suggested_by_default():
+    """It happened zero times in three days; suggesting it anyway just
+    trains the model to skim the note."""
+    for level, kwargs in ((WARN, {}), (URGENT, {})):
+        msg = build_message(level, 400_000, warn_tokens=WARN_T,
+                            urgent_tokens=URGENT_T, **kwargs)
+        assert "subagent" not in msg
+    assert not DEFAULTS["suggest_delegation"]
+
+
+def test_delegation_can_be_re_enabled_by_config():
+    msg = build_message(URGENT, 400_000, warn_tokens=WARN_T,
+                        urgent_tokens=URGENT_T, suggest_delegation=True)
+    assert "subagent" in msg
+
+
+def test_repeat_read_message_gives_an_autonomous_instruction():
+    """The one thing Claude can act on alone: stop re-reading."""
+    msg = build_message(REPEAT_READ, 150_000, hot_file="/proj/session.py",
+                        hot_count=4)
+    assert "already in this conversation" in msg
+    assert "session.py" in msg
+    assert "/compact" not in msg   # irrelevant at this level
+    assert "subagent" not in msg
+
+
+def test_context_message_folds_in_a_do_not_re_read_instruction():
+    msg = build_message(WARN, 280_000, hot_file="/proj/db.py", hot_count=4,
+                        warn_tokens=WARN_T, urgent_tokens=URGENT_T)
+    assert "do not re-read it" in msg
+    assert "db.py" in msg
 
 
 def test_message_reports_absolute_tokens_not_percentages():

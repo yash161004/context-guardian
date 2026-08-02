@@ -62,9 +62,45 @@ def test_compaction_is_detected_from_a_context_drop(conn):
     add_call(conn, offset=0, tokens=280_000)
     n = add_nudge(conn, offset=1, tokens=280_000)
     add_call(conn, offset=2, tokens=40_000)
-    outcome, detail = classify(conn, n, window=15)
+    outcome, detail, _ = classify(conn, n, window=15)
     assert outcome == "compacted"
     assert "280k" in detail and "40k" in detail
+
+
+def test_one_compaction_cannot_be_claimed_by_two_nudges(conn):
+    """Round-1 bug: nudges 7 minutes apart both credited the same later
+    compaction, inflating 3 real events into 4 recorded wins."""
+    add_call(conn, offset=0, tokens=266_000)
+    first = add_nudge(conn, offset=1, tokens=266_000)
+    add_call(conn, offset=2, tokens=399_000)
+    second = add_nudge(conn, offset=3, tokens=399_000)
+    add_call(conn, offset=4, tokens=60_000)          # the single compaction
+    for i in range(15):
+        add_call(conn, offset=5 + i, tokens=61_000)
+
+    claimed = set()
+    o1, _, e1 = classify(conn, first, window=15, claimed_events=claimed)
+    claimed.add(e1)
+    o2, _, e2 = classify(conn, second, window=15, claimed_events=claimed)
+
+    assert o1 == "compacted"
+    assert o2 != "compacted", "the same compaction was counted twice"
+
+
+def test_delegation_is_also_only_credited_once(conn):
+    add_call(conn, offset=0)
+    first = add_nudge(conn, offset=1)
+    second = add_nudge(conn, offset=2)
+    add_call(conn, offset=3, tool="Task")
+    for i in range(15):
+        add_call(conn, offset=4 + i, tool="Edit")
+
+    claimed = set()
+    o1, _, e1 = classify(conn, first, window=15, claimed_events=claimed)
+    claimed.add(e1)
+    o2, _, _ = classify(conn, second, window=15, claimed_events=claimed)
+    assert o1 == "delegated"
+    assert o2 != "delegated"
 
 
 def test_small_context_dip_is_not_a_compaction(conn):

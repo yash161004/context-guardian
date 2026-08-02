@@ -35,6 +35,13 @@ DEFAULTS = {
     # comes before taking actions on someone's behalf.
     "nudge_enabled": True,
 
+    # Off by default after round-1 dogfooding: "delegate to a subagent" was
+    # suggested in every nudge and happened zero times in 2,926 tool calls,
+    # because Claude Code instructs the model not to spawn agents unless the
+    # user asks. Unactionable advice trains the model to skim the whole note.
+    # Turn on only if your setup actively encourages autonomous delegation.
+    "suggest_delegation": False,
+
     # A nudge fires once on *entering* a severity level, not once per turn.
     # In the Phase 0 corpus 60% of all turns sit above the 200k warn line,
     # so a per-turn check would nag continuously and get uninstalled.
