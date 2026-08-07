@@ -1,11 +1,12 @@
 {
+  "_comment": "The interpreter is resolved by fallback because no single name works everywhere: Debian/Ubuntu often has no 'python', and on Windows 'python3' is a Microsoft Store stub that exits 9009 without running anything. Both hooks are guaranteed to exit 0 (see tests/test_sensor.py::test_hook_never_crashes_on_garbage_input), so '||' can only fire when the interpreter itself failed to launch - never because the hook did its job and reported a problem. Order matters: python3 first so macOS/Linux never falls through, then py for Windows, then python.",
   "hooks": {
     "PostToolUse": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/sensor.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/sensor.py\" || py \"${CLAUDE_PLUGIN_ROOT}/hooks/sensor.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/sensor.py\"",
             "timeout": 10
           }
         ]
@@ -16,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/nudge.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/nudge.py\" || py \"${CLAUDE_PLUGIN_ROOT}/hooks/nudge.py\" || python \"${CLAUDE_PLUGIN_ROOT}/hooks/nudge.py\"",
             "timeout": 10
           }
         ]

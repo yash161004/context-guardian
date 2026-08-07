@@ -44,8 +44,10 @@ Then check it's alive:
 python3 -m context_guardian.selfcheck
 ```
 
-**Windows:** the bundled hooks call `python3`. If that isn't on your PATH,
-edit `hooks/hooks.json` and change `python3` to `python`.
+The hooks resolve their interpreter by falling back through `python3` → `py`
+→ `python`, so they work on macOS, Linux, and Windows without editing
+anything. (Debian/Ubuntu frequently has no `python`; Windows ships a
+`python3` stub that isn't Python at all.)
 
 **No dependencies.** Python 3.9+ and the standard library. State lives in a
 local SQLite file at `~/.claude/context-guardian/state.db` and never leaves
@@ -159,8 +161,30 @@ looks off.
 
 ## Does it actually work?
 
-Fair question, and the honest answer is that a nudge only matters if Claude
-acts on it. So that's measured too:
+Fair question, and a nudge only matters if Claude acts on it — so that was
+measured rather than assumed, over six days of real work.
+
+| | judged nudges | acted on |
+|---|---:|---:|
+| first message | 17 | **24%** |
+| current message | 5 | **80%** |
+
+**That second row is five nudges.** Small enough that one different outcome
+moves it a long way, so treat it as "promising, early" rather than a
+benchmark. It is reported here because the alternative — shipping with no
+number at all — is worse.
+
+The first message told Claude to delegate to a subagent or run `/compact`.
+Across 3,580 tool calls it delegated **zero** times, because Claude Code
+instructs it not to spawn agents unprompted — and `/compact` is a user
+command Claude cannot run. Both suggestions were levers the reader didn't
+have. The current message asks only for things it controls: stop re-reading
+what's already in context, and tell you, since you hold `/compact`.
+
+Full method, including three measurement bugs that were hiding the result,
+in [`docs/phase4-results.md`](docs/phase4-results.md).
+
+Measure it for yourself:
 
 ```bash
 python3 -m context_guardian.outcomes
