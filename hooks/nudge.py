@@ -136,6 +136,7 @@ def main():
             # actually raised it with the user - the one action the new
             # message asks for, and one a PostToolUse sensor cannot see.
             transcript_path=transcript_path,
+            message_version=nudge_logic.MESSAGE_VERSION,
         )
         conn.close()
 

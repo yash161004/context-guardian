@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from context_guardian import db  # noqa: E402
-from context_guardian.outcomes import classify  # noqa: E402
+from context_guardian.outcomes import classify, classify_repeat_read  # noqa: E402
 
 T0 = datetime(2026, 7, 28, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -140,6 +140,94 @@ def test_activity_before_the_nudge_is_not_credited(conn):
     for i in range(15):
         add_call(conn, offset=2 + i, tool="Edit")
     assert classify(conn, n, window=15)[0] == "ignored"
+
+
+def add_read(conn, path, session="s", offset=0):
+    db.record_tool_call(
+        conn, session_id=session, tool_name="Read", file_path=path,
+        is_sidechain=False, timestamp=ts(offset), running_context_tokens=150_000)
+
+
+def test_repeat_read_success_is_the_absence_of_a_re_read(conn):
+    """This nudge succeeds by nothing happening. Scoring it with the generic
+    classifier recorded every compliance as 'ignored' - inverting the result
+    for the one instruction Claude can follow entirely on its own."""
+    add_read(conn, "/proj/hot.py", offset=0)
+    db.record_nudge(conn, session_id="s", level="repeat_read",
+                    subject="/proj/hot.py", message="m", context_tokens=150_000,
+                    timestamp=ts(1))
+    n = conn.execute("SELECT * FROM nudges ORDER BY id DESC LIMIT 1").fetchone()
+    for i in range(10):
+        add_read(conn, f"/proj/other{i}.py", offset=2 + i)
+
+    outcome, detail = classify_repeat_read(conn, n)
+    assert outcome == "complied"
+    assert "no further reads" in detail
+
+
+def test_repeat_read_that_continues_is_ignored(conn):
+    add_read(conn, "/proj/hot.py", offset=0)
+    db.record_nudge(conn, session_id="s", level="repeat_read",
+                    subject="/proj/hot.py", message="m", context_tokens=150_000,
+                    timestamp=ts(1))
+    n = conn.execute("SELECT * FROM nudges ORDER BY id DESC LIMIT 1").fetchone()
+    for i in range(8):
+        add_read(conn, f"/proj/other{i}.py", offset=2 + i)
+    add_read(conn, "/proj/HOT.py", offset=20)      # same file, different case
+
+    outcome, detail = classify_repeat_read(conn, n)
+    assert outcome == "ignored"
+    assert "re-read" in detail
+
+
+def test_a_session_that_simply_stopped_is_not_scored_as_compliance(conn):
+    """Guards the finding: 'no further reads' means nothing if there was no
+    further reading at all."""
+    add_read(conn, "/proj/hot.py", offset=0)
+    db.record_nudge(conn, session_id="s", level="repeat_read",
+                    subject="/proj/hot.py", message="m", context_tokens=150_000,
+                    timestamp=ts(1))
+    n = conn.execute("SELECT * FROM nudges ORDER BY id DESC LIMIT 1").fetchone()
+    add_read(conn, "/proj/one.py", offset=2)       # only 1 read afterwards
+
+    assert classify_repeat_read(conn, n)[0] == "pending"
+
+
+def test_message_version_is_backfilled_from_the_message_text(tmp_path):
+    """v1 messages recommended a subagent; v2 messages never do. The row
+    carries its own evidence, which beats guessing from a commit date."""
+    path = tmp_path / "state.db"
+    c = db.connect(path)
+    c.execute("""INSERT INTO nudges (session_id, level, timestamp, active, message)
+                 VALUES ('s','warn','t',1,'... consider delegating to a subagent ...')""")
+    c.execute("""INSERT INTO nudges (session_id, level, timestamp, active, message)
+                 VALUES ('s','warn','t',1,'... their command to run, not yours ...')""")
+    c.commit()
+    c.close()
+
+    c = db.connect(path)   # migration runs again
+    versions = [r["message_version"] for r in
+                c.execute("SELECT message_version FROM nudges ORDER BY id")]
+    assert versions == ["v1", "v2"]
+    c.close()
+
+
+def test_backfill_runs_even_when_the_column_already_exists(tmp_path):
+    """The bug this caused: the backfill was conditioned on having just added
+    the column, so every database created by an earlier version kept NULLs
+    forever and the report silently pooled both message versions."""
+    path = tmp_path / "state.db"
+    c = db.connect(path)
+    c.execute("""INSERT INTO nudges (session_id, level, timestamp, active,
+                                     message, message_version)
+                 VALUES ('s','warn','t',1,'no keyword here', NULL)""")
+    c.commit()
+    c.close()
+
+    c = db.connect(path)
+    row = c.execute("SELECT message_version FROM nudges").fetchone()
+    assert row["message_version"] == "v2"
+    c.close()
 
 
 def test_other_sessions_do_not_leak_into_the_outcome(conn):

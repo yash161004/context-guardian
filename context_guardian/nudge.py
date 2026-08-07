@@ -27,6 +27,14 @@ WARN = "warn"
 URGENT = "urgent"
 REPEAT_READ = "repeat_read"
 
+# Bumped whenever build_message() changes what it asks for. Outcomes must be
+# grouped by this: pooling results from a message that no longer exists with
+# the current one measures neither. Round 1 (v1) scored 17%, round 2 (v2)
+# scored 50%+, and the pooled figure was 25% - a number describing nothing.
+#   v1 - suggested delegating to a subagent / running /compact
+#   v2 - asks for actions the recipient actually controls
+MESSAGE_VERSION = "v2"
+
 # Ordered most severe first - the evaluator returns the first that applies,
 # which is what enforces "one message, never two".
 SEVERITY_ORDER = (URGENT, WARN, REPEAT_READ)

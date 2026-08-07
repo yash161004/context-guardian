@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import load_config
-from .nudge import _fmt_tokens
+from .nudge import MESSAGE_VERSION, _fmt_tokens
 
 # How many tool calls after a nudge still count as "in response to" it.
 DEFAULT_FOLLOW_WINDOW = 15
@@ -123,6 +123,44 @@ def _nearest_tool_call_id(conn, session_id, timestamp):
     return row["id"] if row else 0
 
 
+# A repeat-read nudge succeeds when the file is NOT read again. That is an
+# absence of evidence, so it needs a minimum amount of subsequent reading
+# before "didn't happen" means anything - otherwise a session that simply
+# ended scores as compliance.
+MIN_READS_TO_JUDGE_COMPLIANCE = 5
+
+
+def classify_repeat_read(conn, nudge, lookahead=25):
+    """Did Claude stop re-reading the file it was nudged about?
+
+    Scored separately because this nudge's success condition is the *absence*
+    of an action. The generic classifier looked only for new events and so
+    recorded every compliance as 'ignored' - inverting the result for the one
+    instruction Claude can follow entirely on its own.
+    """
+    subject = (nudge["subject"] or "").replace("\\", "/").lower()
+    if not subject:
+        return "pending", None
+
+    anchor = _nearest_tool_call_id(conn, nudge["session_id"], nudge["timestamp"])
+    rows = conn.execute(
+        """SELECT file_path FROM tool_calls
+            WHERE session_id = ? AND id > ? AND tool_name = 'Read'
+              AND file_path IS NOT NULL
+            ORDER BY id LIMIT ?""",
+        (nudge["session_id"], anchor, lookahead),
+    ).fetchall()
+
+    again = sum(1 for r in rows
+                if (r["file_path"] or "").replace("\\", "/").lower() == subject)
+    if again:
+        return "ignored", f"re-read {again}x more"
+    if len(rows) < MIN_READS_TO_JUDGE_COMPLIANCE:
+        # Too little subsequent reading for the absence to mean anything.
+        return "pending", None
+    return "complied", f"no further reads in {len(rows)}"
+
+
 def classify(conn, nudge, window, claimed_events=None):
     """Work out what happened after one nudge.
 
@@ -132,6 +170,10 @@ def classify(conn, nudge, window, claimed_events=None):
     exactly what happened in round 1, inflating 3 real compactions into 4
     recorded wins. A single event can only be caused by one nudge.
     """
+    if nudge["level"] == "repeat_read":
+        outcome, detail = classify_repeat_read(conn, nudge)
+        return outcome, detail, None
+
     session_id = nudge["session_id"]
     anchor = _nearest_tool_call_id(conn, session_id, nudge["timestamp"])
 
@@ -241,8 +283,10 @@ def run(window=DEFAULT_FOLLOW_WINDOW):
         print(f"No database at {db_path} - nothing recorded yet.")
         return 1
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    # Via db.connect so schema migrations (and the message_version backfill)
+    # are applied before anything is read.
+    from . import db as _db
+    conn = _db.connect(db_path)
     try:
         nudges = conn.execute(
             "SELECT * FROM nudges ORDER BY id").fetchall()
@@ -257,53 +301,65 @@ def run(window=DEFAULT_FOLLOW_WINDOW):
         conn.close()
         return 0
 
-    tally = Counter()
-    claimed = set()
-    print(f"{'when':<20} {'level':<12} {'context':>8}  outcome")
-    print("-" * 72)
+    ACTED = ("delegated", "compacted", "surfaced", "complied")
+
+    # Group by message version. Pooling outcomes from a message that no
+    # longer exists with the current one measures neither - it produced a
+    # meaningless 25% when the two versions were 17% and 50%.
+    groups = {}
     for n in nudges:
-        outcome, detail, event_id = classify(conn, n, window, claimed)
-        if event_id is not None:
-            claimed.add(event_id)
-        # Telling the user is now the action the message asks for, so it
-        # counts as acting - and outranks 'ignored'.
-        if outcome == "ignored" and surfaced_to_user(n):
-            outcome, detail = "surfaced", "raised it with the user"
-        tally[outcome] += 1
-        when = (n["timestamp"] or "")[:19].replace("T", " ")
-        ctx = _fmt_tokens(n["context_tokens"])
-        line = f"{when:<20} {n['level']:<12} {ctx:>8}  {outcome}"
-        if detail:
-            line += f" ({detail})"
-        print(line)
+        version = (n["message_version"] if "message_version" in n.keys() else None)
+        groups.setdefault(version or "v1 (pre-instrumentation)", []).append(n)
 
-    decided = (tally["delegated"] + tally["compacted"] + tally["surfaced"]
-               + tally["ignored"])
-    print("\n" + "-" * 72)
-    print(f"delegated {tally['delegated']}   compacted {tally['compacted']}   "
-          f"surfaced {tally['surfaced']}   ignored {tally['ignored']}   "
-          f"pending {tally['pending']}")
+    claimed = set()
+    latest_rate = latest_judged = None
+    for version, group in groups.items():
+        tally = Counter()
+        print(f"\n--- message {version} --- ({len(group)} nudge(s))")
+        print(f"{'when':<20} {'level':<12} {'context':>8}  outcome")
+        print("-" * 72)
+        for n in group:
+            outcome, detail, event_id = classify(conn, n, window, claimed)
+            if event_id is not None:
+                claimed.add(event_id)
+            # Telling the user is the action the current message asks for.
+            if outcome == "ignored" and surfaced_to_user(n):
+                outcome, detail = "surfaced", "raised it with the user"
+            tally[outcome] += 1
+            when = (n["timestamp"] or "")[:19].replace("T", " ")
+            ctx = _fmt_tokens(n["context_tokens"])
+            line = f"{when:<20} {n['level']:<12} {ctx:>8}  {outcome}"
+            if detail:
+                line += f" ({detail})"
+            print(line)
 
-    if decided == 0:
-        print("\nNo nudge has enough follow-up activity to judge yet.")
-        conn.close()
-        return 0
+        judged = sum(v for k, v in tally.items() if k != "pending")
+        acted = sum(tally[k] for k in ACTED)
+        print("\n  " + "   ".join(f"{k} {v}" for k, v in sorted(tally.items())))
+        if judged:
+            rate = acted / judged * 100
+            print(f"  acted on: {acted}/{judged} ({rate:.0f}%)")
+            latest_rate, latest_judged = rate, judged
+        else:
+            print("  nothing judged yet")
 
-    acted = tally["delegated"] + tally["compacted"] + tally["surfaced"]
-    rate = acted / decided * 100
-    print(f"\nacted on: {acted}/{decided} ({rate:.0f}%)")
-
-    # The pre-committed launch gate. Stated here rather than in a doc so the
-    # criterion cannot drift after seeing the result.
-    print("\nGate for launching (set before collecting this data):")
-    if decided < 5:
-        print(f"  NOT YET - {decided} judged nudge(s), need at least 5.")
-    elif rate >= 50:
-        print(f"  PASS - {rate:.0f}% acted on. The message works. Ship it.")
+    # The gate applies to the CURRENT message only - older versions are
+    # history, not evidence about what ships today.
+    print("\n" + "=" * 72)
+    print(f"Gate (pre-committed) - evaluated against message "
+          f"{MESSAGE_VERSION} only:")
+    if latest_judged is None or latest_judged < 5:
+        n = latest_judged or 0
+        print(f"  NOT YET - {n} judged nudge(s) on the current message, "
+              f"need at least 5.")
+    elif latest_rate >= 50:
+        print(f"  PASS - {latest_rate:.0f}% acted on across {latest_judged} "
+              f"judged nudge(s).")
+        print( "         The message works. Note the sample size in any "
+               "public claim.")
     else:
-        print(f"  FAIL - only {rate:.0f}% acted on. The wording is the problem, "
-              f"not the\n         detector. Rewrite the message "
-              f"(context_guardian/nudge.py:build_message)\n         and "
+        print(f"  FAIL - only {latest_rate:.0f}% acted on. Rewrite the message "
+              f"(nudge.py:build_message),\n         bump MESSAGE_VERSION, and "
               f"re-measure before launching.")
 
     conn.close()

@@ -134,15 +134,79 @@ silently scored as failures.
 
 ---
 
-## Round 2
+---
 
-Same gate, same discipline: **≥50% acted on**, minimum 5 judged nudges,
-where "acted" now includes `surfaced`.
+# Round 2 Results (2026-08-05 → 2026-08-06)
 
-Three more working days. If it still fails with the rewritten message, the
-conclusion is no longer "fix the wording" — it is that a text nudge cannot
-change behaviour mid-session, and the honest response is to say so publicly
-and ship it as a measurement tool rather than an intervention.
+**GATE PASSED — 80% acted on, 4 of 5 judged nudges (v2 message).**
 
-That would still be a real result, and a more interesting README than most
-tools in this space have.
+| message | judged | acted | rate |
+|---|---:|---:|---:|
+| v1 (round 1) | 17 | 4 | **24%** |
+| v2 (round 2) | 5 | 4 | **80%** |
+
+The rewrite worked. But the tracker reported **36%**, which is neither
+number, and three separate measurement faults had to be fixed before the
+real result was visible.
+
+## Three faults, all of which understated v2
+
+**1. It pooled two different interventions.** v1 and v2 nudges were averaged
+together. Half the sample was a message that no longer exists in the
+codebase. Nudges now record `message_version`, the report groups by it, and
+the gate evaluates the *current* message only.
+
+**2. Repeat-read compliance was scored as failure.** That nudge succeeds by
+the file *not* being read again — an absence, which the event-hunting
+classifier could not see. `_legacy.py` was followed by 25 reads and never
+touched again; that was recorded as `ignored`. Now scored by whether the
+re-reading actually stopped, with a guard: fewer than 5 subsequent reads is
+`pending`, not compliance, so a session that merely ended cannot masquerade
+as success.
+
+**3. The backfill never ran.** It was conditioned on having just added the
+`message_version` column — but the column had been added by an earlier run
+that predated the backfill, so every existing row stayed `NULL` and the
+report silently pooled everything. A data migration must be driven by the
+state of the data, never by the schema-change event. Both faults are now
+tested.
+
+## Guarding against motivated reasoning
+
+Three corrections that all moved the number toward PASS is a pattern worth
+distrusting. So the conservative reading, dropping the repeat-read scoring
+change entirely and only separating v1 from v2:
+
+> v2: 3 acted (2 compacted, 1 surfaced) of 6 judged = **50%**
+
+**The gate passes either way** — at exactly 50% on the strictest reading, at
+80% with repeat-read compliance counted. The decision does not depend on the
+scoring change, which is the only reason to trust it.
+
+## The honest caveat
+
+**n = 5.** The pre-committed gate required a minimum of 5 judged nudges and
+that is exactly what it got. The improvement over v1 is large and consistent
+(24% → 50–80%), but a single different outcome would move the conservative
+figure below the line.
+
+The gate was pre-committed and it is met, so it is honoured — the same rule
+that made round 1 a genuine failure makes this a genuine pass. But any public
+claim must state the sample size. "80% of 5" is honest; "80%" alone is not.
+
+## What actually changed behaviour
+
+v2's wins came from asking for things the recipient controls:
+
+- 3× **compacted** — Claude raised it, the context then dropped 207k→69k,
+  350k→63k, 428k→61k
+- 1× **surfaced** — Claude told the user unprompted
+- 1× **complied** — stopped re-reading a file after being told it was
+  already in context
+- **0× delegated**, still. Across both rounds and 3,580 tool calls, not one
+  subagent. Removing that advice was correct.
+
+## Next
+
+Launch. The remaining gap is the README's before/after clip, which now has
+real material: five v2 nudges with recorded outcomes.

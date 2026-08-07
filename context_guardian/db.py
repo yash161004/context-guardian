@@ -72,9 +72,23 @@ def _migrate(conn):
     worth making.
     """
     have = {r["name"] for r in conn.execute("PRAGMA table_info(nudges)")}
-    for column, ddl in (("transcript_path", "TEXT"),):
+    for column, ddl in (("transcript_path", "TEXT"),
+                        ("message_version", "TEXT")):
         if column not in have:
             conn.execute(f"ALTER TABLE nudges ADD COLUMN {column} {ddl}")
+
+    # Backfill from the stored message text rather than by date: every v1
+    # message recommended a subagent and no v2 message does, so the row
+    # carries its own evidence - better than guessing from a commit date.
+    #
+    # Driven by the data (rows still NULL), NOT by "did we just add the
+    # column". Conditioning a backfill on the schema-change event silently
+    # skips every database where the column was added by an earlier version
+    # that had no backfill - which is exactly what happened here.
+    conn.execute(
+        """UPDATE nudges SET message_version =
+               CASE WHEN message LIKE '%subagent%' THEN 'v1' ELSE 'v2' END
+             WHERE message_version IS NULL""")
 
 
 def record_tool_call(conn, *, session_id, tool_name, file_path, is_sidechain,
@@ -143,14 +157,15 @@ def has_active_nudge(conn, session_id, level, subject=None):
 
 
 def record_nudge(conn, *, session_id, level, message, subject=None,
-                 context_tokens=None, timestamp, transcript_path=None):
+                 context_tokens=None, timestamp, transcript_path=None,
+                 message_version=None):
     conn.execute(
         """INSERT INTO nudges
                (session_id, level, subject, context_tokens, timestamp,
-                active, message, transcript_path)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+                active, message, transcript_path, message_version)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)""",
         (session_id, level, subject, context_tokens, timestamp, message,
-         transcript_path),
+         transcript_path, message_version),
     )
     conn.commit()
 
